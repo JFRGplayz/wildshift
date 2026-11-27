@@ -1,0 +1,492 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<title>WILDSHIFT | The Living Jungle</title>
+<style>
+/* SECTION: PAGE */
+*{box-sizing:border-box}
+html,body{margin:0;width:100%;height:100%;overflow:hidden;background:#07171b;color:#e7f5e9;font-family:Inter,system-ui,sans-serif}
+canvas{display:block}
+/* SECTION: INTRO */
+#intro{position:fixed;inset:0;z-index:5;display:grid;place-items:center;text-align:center;padding:24px;background:linear-gradient(180deg,rgba(5,24,28,.24),rgba(4,16,22,.78)),radial-gradient(ellipse at 50% 40%,rgba(67,161,133,.22),transparent 65%);transition:opacity .65s}
+#intro.hidden{opacity:0;pointer-events:none}
+#intro-card{max-width:650px}
+#intro h1{font-size:clamp(3.6rem,12vw,7.5rem);letter-spacing:.18em;margin:0;color:#e0f4d9;font-weight:800;text-shadow:0 0 25px #79e4c1,0 5px 30px #001}
+#intro .sub{letter-spacing:.38em;text-transform:uppercase;color:#a9e4ca;font-size:.75rem;margin:8px 0 30px}
+#intro p{color:#d1e7dc;line-height:1.7}
+#start{margin-top:18px;padding:15px 36px;background:#245c50aa;border:1px solid #9ae8c7;color:#f1fff6;letter-spacing:.2em;font-weight:700;cursor:pointer}
+#start:hover{background:#39836a;box-shadow:0 0 30px #59d4a455}
+/* SECTION: HUD */
+#hud{position:fixed;inset:0;z-index:3;pointer-events:none;opacity:0;transition:opacity .5s}
+#hud.visible{opacity:1}
+#topline{position:absolute;top:22px;left:26px;right:26px;display:flex;justify-content:space-between;font-size:10px;letter-spacing:.22em;text-shadow:0 2px 8px #001;color:#e3f5e9}
+#location{color:#a8e5c7}
+#crosshair{position:absolute;left:50%;top:50%;width:5px;height:5px;border:1px solid #eafff0;border-radius:50%;transform:translate(-50%,-50%);box-shadow:0 0 8px #baffdf}
+#hint{position:absolute;bottom:23px;left:50%;transform:translateX(-50%);padding:10px 15px;background:#061a1aaa;border:1px solid #c8f6df35;color:#d7f5e7;font-size:10px;letter-spacing:.12em;white-space:nowrap}
+#help{position:absolute;right:24px;bottom:20px;text-align:right;color:#c5e8d5aa;font-size:10px;line-height:1.8;letter-spacing:.08em}
+#vignette{position:fixed;inset:0;z-index:2;pointer-events:none;background:radial-gradient(ellipse at center,transparent 48%,rgba(0,13,16,.34) 100%)}
+@media(max-width:650px){#help{display:none}#hint{font-size:8px;bottom:14px}}
+</style>
+</head>
+<body>
+<!-- SECTION: GAME CANVAS -->
+<div id="game"></div><div id="vignette"></div>
+<!-- SECTION: INTRO SCREEN -->
+<section id="intro"><div id="intro-card">
+<h1>WILDSHIFT</h1><div class="sub">The Living Jungle</div>
+<p>Beyond the quiet clearing, an ancient world breathes beneath a distant alien sky.</p>
+<p>Step into the Verdant Reach.</p>
+<button id="start">ENTER THE JUNGLE</button>
+<p style="font-size:10px;color:#9abeb0;letter-spacing:.12em">MOUSE + KEYBOARD RECOMMENDED</p>
+</div></section>
+<!-- SECTION: HUD -->
+<section id="hud">
+<div id="topline"><div>WILDSHIFT <span style="color:#81a99b">/ FIELD EXPLORATION</span></div><div id="location">THE VERDANT REACH</div></div>
+<div id="crosshair"></div>
+<div id="hint">WASD MOVE&nbsp; • &nbsp;MOUSE LOOK&nbsp; • &nbsp;SPACE JUMP&nbsp; • &nbsp;SHIFT SPRINT</div>
+<div id="help">ESC RELEASE MOUSE<br>WASD MOVE<br>SPACE JUMP<br>SHIFT SPRINT</div>
+</section>
+<!-- SECTION: THREE.JS -->
+<script src="https://cdn.jsdelivr.net/npm/three@0.128.0/build/three.min.js"></script>
+<script>
+(() => {
+'use strict';
+// SECTION: CORE SETUP
+const mount=document.getElementById('game');
+const scene=new THREE.Scene();
+scene.fog=new THREE.FogExp2(0x8bb9a9,.0062);
+const camera=new THREE.PerspectiveCamera(72,innerWidth/innerHeight,.1,1400);
+camera.position.set(0,2.1,12);
+const renderer=new THREE.WebGLRenderer({antialias:true,powerPreference:'high-performance'});
+renderer.setSize(innerWidth,innerHeight);
+renderer.setPixelRatio(Math.min(devicePixelRatio,1.35));
+renderer.outputEncoding=THREE.sRGBEncoding;
+renderer.toneMapping=THREE.ACESFilmicToneMapping;
+renderer.toneMappingExposure=1.28;
+mount.appendChild(renderer.domElement);
+
+// SECTION: LIGHTING
+scene.add(new THREE.HemisphereLight(0xc9f4e5,0x263c35,1.65));
+const sun=new THREE.DirectionalLight(0xffdfb0,2.05);
+sun.position.set(-100,150,80);scene.add(sun);
+const skyFill=new THREE.DirectionalLight(0x69c9c0,.48);
+skyFill.position.set(90,50,-100);scene.add(skyFill);
+
+// SECTION: SKY DOME
+const sky=new THREE.Mesh(new THREE.SphereGeometry(900,32,20),new THREE.ShaderMaterial({
+ side:THREE.BackSide,
+ uniforms:{top:{value:new THREE.Color(0x347f89)},mid:{value:new THREE.Color(0x9bc9b1)},bottom:{value:new THREE.Color(0xe3c99f)}},
+ vertexShader:'varying vec3 vPos; void main(){vPos=position;gl_Position=projectionMatrix*modelViewMatrix*vec4(position,1.0);}',
+ fragmentShader:'uniform vec3 top;uniform vec3 mid;uniform vec3 bottom;varying vec3 vPos;void main(){float h=normalize(vPos).y;vec3 c=mix(bottom,mid,smoothstep(-.18,.25,h));c=mix(c,top,smoothstep(.18,.82,h));gl_FragColor=vec4(c,1.0);}'
+}));
+scene.add(sky);
+const sunDisc=new THREE.Mesh(new THREE.SphereGeometry(19,24,20),new THREE.MeshBasicMaterial({color:0xffe5b9}));
+sunDisc.position.set(-210,125,-510);scene.add(sunDisc);
+const sunHalo=new THREE.Mesh(new THREE.SphereGeometry(29,24,20),new THREE.MeshBasicMaterial({color:0xffdca9,transparent:true,opacity:.12,side:THREE.BackSide}));
+sunHalo.position.copy(sunDisc.position);scene.add(sunHalo);
+
+// SECTION: MATERIALS
+const material=(color,roughness=1,extra={})=>new THREE.MeshStandardMaterial({color,roughness,...extra});
+const trunkMat=material(0x59493c);
+const trunkLight=material(0x80674c);
+const canopyMats=[material(0x285e4b),material(0x34785c),material(0x438b69),material(0x28636a)];
+const glowMat=material(0x80ffd6,.35,{emissive:0x23bd91,emissiveIntensity:2.1});
+const violetMat=material(0xc2a3ff,.4,{emissive:0x5735ad,emissiveIntensity:1.2});
+const stoneMat=material(0x60736a);
+const waterMat=new THREE.MeshStandardMaterial({color:0x238f91,roughness:.2,metalness:.16,emissive:0x07545a,emissiveIntensity:.8,transparent:true,opacity:.91});
+
+// SECTION: PROCEDURAL SURFACE TEXTURES
+// Small generated textures add visual detail without downloading image assets.
+function makeTexture(size, painter, repeatX=1, repeatY=1){
+ const canvas=document.createElement('canvas');canvas.width=canvas.height=size;
+ const ctx=canvas.getContext('2d');painter(ctx,size);
+ const texture=new THREE.CanvasTexture(canvas);
+ texture.wrapS=texture.wrapT=THREE.RepeatWrapping;
+ texture.repeat.set(repeatX,repeatY);
+ texture.anisotropy=renderer.capabilities.getMaxAnisotropy();
+ texture.minFilter=THREE.LinearMipmapLinearFilter;
+ texture.magFilter=THREE.LinearFilter;
+ texture.generateMipmaps=true;
+ texture.encoding=THREE.sRGBEncoding;
+ return texture;
+}
+const barkTexture=makeTexture(1024,(ctx,n)=>{
+  // Warm, varied heartwood base with subtle mottling.
+  ctx.fillStyle='#514236';ctx.fillRect(0,0,n,n);
+  for(let i=0;i<18000;i++){
+   const x=Math.random()*n,y=Math.random()*n,r=rand(2,22);
+   ctx.fillStyle=Math.random()>.5?'rgba(142,112,79,.055)':'rgba(12,18,15,.075)';
+   ctx.beginPath();ctx.ellipse(x,y,r,r*rand(1,3),rand(-.15,.15),0,Math.PI*2);ctx.fill();
+  }
+  // Long, broken vertical ridges. Vary width, colour and direction.
+  for(let i=0;i<1450;i++){
+   const x=Math.random()*n,y=Math.random()*n,h=rand(45,260),w=rand(.7,5.5);
+   ctx.strokeStyle=Math.random()>.58?'rgba(190,151,112,.22)':Math.random()>.45?'rgba(17,22,18,.34)':'rgba(105,78,57,.32)';
+   ctx.lineWidth=w;ctx.beginPath();ctx.moveTo(x,y);
+   ctx.bezierCurveTo(x+rand(-9,9),y+h*.25,x+rand(-7,7),y+h*.72,x+rand(-10,10),y+h);ctx.stroke();
+  }
+  // Flaky bark plates with shadowed edges and lighter worn centres.
+  for(let i=0;i<520;i++){
+   const x=Math.random()*n,y=Math.random()*n,w=rand(5,25),h=rand(12,55);
+   ctx.beginPath();ctx.moveTo(x,y);ctx.lineTo(x+w,y+rand(-4,4));ctx.lineTo(x+w*rand(.55,.9),y+h);ctx.lineTo(x+rand(-4,3),y+h*rand(.65,.9));ctx.closePath();
+   ctx.fillStyle=Math.random()>.5?'rgba(17,22,18,.23)':'rgba(191,151,108,.13)';ctx.fill();
+   ctx.strokeStyle='rgba(8,14,12,.22)';ctx.lineWidth=1;ctx.stroke();
+  }
+  // Knots and fine cracks.
+  for(let i=0;i<24;i++){
+   const x=rand(0,n),y=rand(0,n),rx=rand(3,10),ry=rand(6,18);
+   ctx.strokeStyle='rgba(17,15,12,.48)';ctx.lineWidth=2;ctx.beginPath();ctx.ellipse(x,y,rx,ry,rand(-.25,.25),0,Math.PI*2);ctx.stroke();
+   ctx.strokeStyle='rgba(194,153,111,.24)';ctx.lineWidth=1;ctx.beginPath();ctx.ellipse(x,y,rx*.55,ry*.55,0,0,Math.PI*2);ctx.stroke();
+  }
+  // Moss is patchy and concentrated near the foot of the trunk.
+  for(let i=0;i<150;i++){
+   const x=Math.random()*n,y=rand(n*.68,n),r=rand(2,14);
+   ctx.fillStyle=Math.random()>.5?'rgba(82,119,65,.28)':'rgba(157,164,105,.18)';
+   ctx.beginPath();ctx.ellipse(x,y,r,r*rand(.5,1.7),rand(0,Math.PI),0,Math.PI*2);ctx.fill();
+  }
+},1,3);
+trunkMat.map=barkTexture;trunkMat.color.set(0xffffff);trunkMat.needsUpdate=true;
+trunkLight.map=barkTexture;trunkLight.color.set(0xffffff);trunkLight.needsUpdate=true;
+const barkBump=makeTexture(1024,(ctx,n)=>{
+ ctx.fillStyle='#777';ctx.fillRect(0,0,n,n);
+ for(let i=0;i<2300;i++){
+  const x=Math.random()*n,y=Math.random()*n,h=rand(25,180);
+  ctx.strokeStyle=Math.random()>.5?'rgba(245,245,245,.30)':'rgba(15,15,15,.32)';
+  ctx.lineWidth=rand(.6,2.8);ctx.beginPath();ctx.moveTo(x,y);
+  ctx.bezierCurveTo(x+rand(-4,4),y+h*.35,x+rand(-4,4),y+h*.7,x+rand(-5,5),y+h);ctx.stroke();
+ }
+},1,3);
+trunkMat.bumpMap=barkBump;trunkMat.bumpScale=.055;
+trunkLight.bumpMap=barkBump;trunkLight.bumpScale=.065;
+trunkMat.needsUpdate=true;trunkLight.needsUpdate=true;
+
+const groundTexture=makeTexture(1024,(ctx,n)=>{
+  ctx.fillStyle='#526b49';ctx.fillRect(0,0,n,n);
+  // Fine soil, tiny leaf litter and colour variation.
+  for(let i=0;i<42000;i++){
+   const x=Math.random()*n,y=Math.random()*n,r=rand(.35,2.1),v=Math.floor(30+Math.random()*95);
+   ctx.fillStyle=`rgba(${v},${Math.floor(v*1.28)},${Math.floor(v*.72)},${rand(.035,.19)})`;
+   ctx.beginPath();ctx.arc(x,y,r,0,Math.PI*2);ctx.fill();
+  }
+  // Short grass blades in irregular tufts, not pale cloud-like patches.
+  for(let i=0;i<10500;i++){
+   const x=Math.random()*n,y=Math.random()*n,len=rand(2,13),lean=rand(-4,4);
+   const shade=Math.random();
+   ctx.strokeStyle=shade>.72?'rgba(174,184,105,.28)':shade>.32?'rgba(67,112,57,.34)':'rgba(25,62,39,.28)';
+   ctx.lineWidth=rand(.45,1.35);ctx.beginPath();ctx.moveTo(x,y);ctx.quadraticCurveTo(x+lean*.4,y-len*.55,x+lean,y-len);ctx.stroke();
+  }
+  // Fallen narrow leaves and dark organic litter.
+  for(let i=0;i<650;i++){
+   const x=Math.random()*n,y=Math.random()*n,a=rand(-.8,.8),len=rand(3,12);
+   ctx.save();ctx.translate(x,y);ctx.rotate(a);ctx.fillStyle=Math.random()>.5?'rgba(126,113,67,.22)':'rgba(39,67,43,.25)';
+   ctx.beginPath();ctx.ellipse(0,0,len,rand(.5,1.5),0,0,Math.PI*2);ctx.fill();ctx.restore();
+  }
+},34,34);
+
+// SECTION: TERRAIN
+function heightAt(x,z){return Math.sin(x*.027)*1.35+Math.cos(z*.032)*1.2+Math.sin((x+z)*.018)*1.8+Math.cos(x*.009-z*.018)*2.1;}
+const groundGeo=new THREE.PlaneGeometry(760,760,100,100);groundGeo.rotateX(-Math.PI/2);
+const gp=groundGeo.attributes.position;
+const terrainColors=[];
+const low=new THREE.Color(0x254b3b),high=new THREE.Color(0x52794e),cool=new THREE.Color(0x294c49);
+for(let i=0;i<gp.count;i++){
+ const x=gp.getX(i),z=gp.getZ(i),y=heightAt(x,z);
+ gp.setY(i,y);
+ const shade=THREE.MathUtils.clamp((y+4)/12,0,1);
+ const col=low.clone().lerp(high,shade).lerp(cool,Math.max(0,Math.sin(x*.018+z*.021))*.2);
+ terrainColors.push(col.r,col.g,col.b);
+}
+groundGeo.setAttribute('color',new THREE.Float32BufferAttribute(terrainColors,3));groundGeo.computeVertexNormals();
+const ground=new THREE.Mesh(groundGeo,new THREE.MeshStandardMaterial({vertexColors:true,roughness:1,map:groundTexture}));
+ground.position.y=-1.35;scene.add(ground);
+
+// SECTION: INSTANCING HELPERS
+const dummy=new THREE.Object3D();
+function makeInstances(geometry,mat,count){const mesh=new THREE.InstancedMesh(geometry,mat,count);mesh.instanceMatrix.setUsage(THREE.StaticDrawUsage);return mesh;}
+function place(mesh,index,x,y,z,sx,sy,sz,rot=0,color=null,rx=0,rz=0){
+ dummy.position.set(x,y,z);dummy.rotation.set(rx,rot,rz);dummy.scale.set(sx,sy,sz);dummy.updateMatrix();
+ mesh.setMatrixAt(index,dummy.matrix);mesh.instanceMatrix.needsUpdate=true;if(color){mesh.setColorAt(index,new THREE.Color(color));if(mesh.instanceColor)mesh.instanceColor.needsUpdate=true;}
+}
+function rand(min,max){return min+Math.random()*(max-min);}
+
+
+// Organic trunk profile: flared roots, taper, gentle bends and uneven bark silhouette.
+function makeTreeTrunkGeometry(){
+ const g=new THREE.CylinderGeometry(.56,1.42,1,14,14,false);
+ const p=g.attributes.position;
+ for(let i=0;i<p.count;i++){
+  const y=p.getY(i), radial=Math.sqrt(p.getX(i)*p.getX(i)+p.getZ(i)*p.getZ(i));
+  const t=y+.5;
+  const wave=1+.035*Math.sin(t*19)+.018*Math.sin(t*43+1.7);
+  const rootFlare=1+.22*Math.pow(1-t,3);
+  const bendX=.035*Math.sin(t*4.2),bendZ=.028*Math.sin(t*5.4+1.2);
+  const factor=wave*rootFlare;
+  p.setX(i,p.getX(i)*factor+bendX);
+  p.setZ(i,p.getZ(i)*factor+bendZ);
+ }
+ p.needsUpdate=true;g.computeVertexNormals();return g;
+}
+const treeTrunkGeometry=makeTreeTrunkGeometry();
+// Organic canopy lobes, with slight asymmetry rather than perfect spheres.
+function makeCanopyGeometry(){
+ const g=new THREE.SphereGeometry(1,18,13),p=g.attributes.position;
+ for(let i=0;i<p.count;i++){
+  const x=p.getX(i),y=p.getY(i),z=p.getZ(i);
+  const n=1+.085*Math.sin(x*7.3+y*4.1)*Math.cos(z*6.2+y*3.7)+.035*Math.sin(z*13+x*5)+.018*Math.sin(y*19+x*11);
+  p.setXYZ(i,x*n,y*n,z*n);
+ }
+ p.needsUpdate=true;g.computeVertexNormals();return g;
+}
+const canopyGeometry=makeCanopyGeometry();
+
+// SECTION: REALISTIC LEAF GEOMETRY
+// A gently cupped, pointed leaf with a raised central rib instead of an ellipsoid.
+function makeLeafGeometry(length=1,width=.34){
+ const segments=9,across=6,positions=[],uvs=[],indices=[];
+ for(let i=0;i<=segments;i++){
+  const t=i/segments;
+  const half=Math.pow(Math.sin(Math.PI*t),.82)*width*.5;
+  for(let j=0;j<=across;j++){
+   const u=j/across*2-1;
+   const x=u*half;
+   const y=(t-.5)*length;
+   const z=.075*Math.sin(Math.PI*t)*(1-u*u)+.018*Math.sin(t*Math.PI*2);
+   positions.push(x,y,z);uvs.push(j/across,t);
+  }
+ }
+ for(let i=0;i<segments;i++)for(let j=0;j<across;j++){
+  const a=i*(across+1)+j,b=a+across+1;
+  indices.push(a,b,a+1,b,b+1,a+1);
+ }
+ const g=new THREE.BufferGeometry();g.setAttribute('position',new THREE.Float32BufferAttribute(positions,3));g.setAttribute('uv',new THREE.Float32BufferAttribute(uvs,2));g.setIndex(indices);g.computeVertexNormals();return g;
+}
+const leafGeometry=makeLeafGeometry(1,.42);
+const smallLeafGeometry=makeLeafGeometry(1,.29);
+
+
+// SECTION: TREE POPULATION
+// Repeated tree parts are instanced, keeping draw calls low.
+const TREE_COUNT=210;
+const trunks=makeInstances(treeTrunkGeometry,trunkMat,TREE_COUNT);
+const crownsA=makeInstances(canopyGeometry,canopyMats[0],TREE_COUNT);
+const crownsB=makeInstances(canopyGeometry,canopyMats[1],TREE_COUNT);
+const crownsC=makeInstances(canopyGeometry,canopyMats[2],TREE_COUNT);
+const crownsD=makeInstances(canopyGeometry,canopyMats[3],TREE_COUNT);
+for(let i=0;i<TREE_COUNT;i++){
+ let x,z;
+ do{x=rand(-260,260);z=rand(-260,260);}while(Math.abs(x)<18&&Math.abs(z)<20);
+ const y=heightAt(x,z)-1.35, h=rand(13,23), s=rand(.85,1.35);
+ place(trunks,i,x,y+h*.5,z,rand(.85,1.2),h,rand(.85,1.2),rand(-.07,.07));
+ const cr=rand(5.5,8.5)*s, cy=y+h*.83;
+ place(crownsA,i,x-rand(1,3),cy,z+rand(-2,2),cr*1.15,cr*.76,cr,rand(0,6));
+ place(crownsB,i,x+rand(-2,2),cy+rand(-1.5,1.5),z-rand(1,3),cr,cr*.82,cr*1.08,rand(0,6));
+ place(crownsC,i,x+rand(-2,2),cy+rand(1,3),z+rand(-2,2),cr*.85,cr*.72,cr*.9,rand(0,6));
+ place(crownsD,i,x,cy+cr*.42,z,cr*.68,cr*.62,cr*.7,rand(0,6));
+}
+// SECTION: NATURAL TREE LIMBS
+// Short, upward-sweeping limbs emerge from the trunk and remain tucked inside the crown.
+const branchCount=TREE_COUNT*4;
+const branchGeo=new THREE.CylinderGeometry(.055,.24,1,8,3);
+const branches=makeInstances(branchGeo,trunkMat,branchCount);
+const treeMatrix=new THREE.Matrix4(),treePos=new THREE.Vector3(),treeScale=new THREE.Vector3(),treeQuat=new THREE.Quaternion();
+const limbStart=new THREE.Vector3(),limbEnd=new THREE.Vector3();
+for(let i=0;i<TREE_COUNT;i++){
+ trunks.getMatrixAt(i,treeMatrix);treeMatrix.decompose(treePos,treeQuat,treeScale);
+ const h=treeScale.y;
+ for(let b=0;b<4;b++){
+  const angle=b*Math.PI*.5+i*.73;
+  const y=treePos.y+h*rand(.55,.72);
+  limbStart.set(treePos.x,y,treePos.z);
+  const len=h*rand(.19,.27);
+  limbEnd.set(treePos.x+Math.cos(angle)*len*.9,y+len*.42,treePos.z+Math.sin(angle)*len*.9);
+  placeBetween(branches,i*4+b,limbStart,limbEnd,rand(.72,.95),rand(.72,.95));
+ }
+}
+scene.add(trunks,crownsA,crownsB,crownsC,crownsD,branches);
+// Four massive trees frame the starting clearing.
+const giantTrunks=makeInstances(treeTrunkGeometry,trunkLight,4);
+const giantCrowns=makeInstances(canopyGeometry,canopyMats[1],12);
+const giantPositions=[[-39,-26,2.6],[43,-43,2.35],[-52,38,2.25],[57,32,2.5]];
+let gi=0,gc=0;
+for(const [x,z,s] of giantPositions){
+ const y=heightAt(x,z)-1.35,h=29*s;
+ place(giantTrunks,gi++,x,y+h/2,z,2.2*s,h,2.2*s,rand(-.08,.08));
+ for(let k=0;k<3;k++){const a=k*Math.PI*2/3;place(giantCrowns,gc++,x+Math.cos(a)*5*s,y+h*.85+rand(-2,3),z+Math.sin(a)*5*s,10*s,7*s,9*s,rand(0,6));}
+}
+scene.add(giantTrunks,giantCrowns);
+
+// SECTION: UNDERGROWTH
+// Ferns use individual pointed fronds radiating from a small, dark central crown.
+const FERN_COUNT=95;
+const fernMat=material(0x397c58,.88,{side:THREE.DoubleSide});
+const fernLightMat=material(0x6b9e60,.9,{side:THREE.DoubleSide});
+const fernLeaves=makeInstances(leafGeometry,fernMat,FERN_COUNT*9);
+const fernTips=makeInstances(smallLeafGeometry,fernLightMat,FERN_COUNT*9);
+const fernBases=makeInstances(new THREE.SphereGeometry(.18,8,6),material(0x304b35),FERN_COUNT);
+let fi=0,fti=0;
+for(let i=0;i<FERN_COUNT;i++){
+ const x=rand(-130,130),z=rand(-130,130);if(Math.abs(x)<5&&Math.abs(z)<7)continue;
+ const y=heightAt(x,z)-1.29;
+ place(fernBases,i,x,y+.12,z,.9,.65,.9);
+ for(let j=0;j<9;j++){
+  const a=j/9*Math.PI*2+rand(-.12,.12),len=rand(1.15,1.9),tilt=rand(.72,1.02);
+  place(fernLeaves,fi++,x+Math.cos(a)*len*.28,y+len*.42,z+Math.sin(a)*len*.28,.8,len,.8,a,null,Math.cos(a)*tilt,Math.sin(a)*tilt);
+  place(fernTips,fti++,x+Math.cos(a)*len*.48,y+len*.76,z+Math.sin(a)*len*.48,.62,len*.42,.62,a,null,Math.cos(a)*tilt,Math.sin(a)*tilt);
+ }
+}
+scene.add(fernBases,fernLeaves,fernTips);
+
+// SECTION: JUNGLE DETAIL
+// Layered broadleaf shrubs. Individual leaves have pointed tips and a subtle cupped profile.
+const broadLeafMat=material(0x397b55,.86,{side:THREE.DoubleSide});
+const broadLeafLight=material(0x6b9c60,.88,{side:THREE.DoubleSide});
+const broadLeafCount=1320;
+const broadLeaves=makeInstances(leafGeometry,broadLeafMat,broadLeafCount);
+const broadLeavesLight=makeInstances(smallLeafGeometry,broadLeafLight,360);
+let bli=0,bll=0;
+for(let i=0;i<240;i++){
+ const x=rand(-155,155),z=rand(-155,155);
+ if(Math.abs(x)<7&&Math.abs(z)<9)continue;
+ const y=heightAt(x,z)-1.28,spread=rand(.65,1.25);
+ for(let j=0;j<5;j++){
+  const a=j*Math.PI*2/5+rand(-.3,.3),len=rand(1.0,1.8)*spread;
+  place(broadLeaves,bli++,x+Math.cos(a)*len*.36,y+len*.43,z+Math.sin(a)*len*.36,
+   rand(.72,1.05),len,rand(.8,1.15),a,null,Math.cos(a)*rand(-.45,-.2),Math.sin(a)*rand(-.45,-.2));
+ }
+ if(i%3===0){
+  const a=rand(0,Math.PI*2),len=rand(1.1,1.75);
+  place(broadLeavesLight,bll++,x+Math.cos(a)*.48,y+len*.5,z+Math.sin(a)*.48,.8,len,.85,a,null,Math.cos(a)*-.35,Math.sin(a)*-.35);
+ }
+}
+scene.add(broadLeaves,broadLeavesLight);
+
+// Buttress roots make the larger trees feel anchored into the terrain.
+const rootMat=material(0x594a3b,.96);
+const roots=makeInstances(new THREE.CylinderGeometry(.045,.58,1,10,4),rootMat, TREE_COUNT*3+24);
+const upAxis=new THREE.Vector3(0,1,0),rootDir=new THREE.Vector3();
+function placeBetween(mesh,index,a,b,radiusX=1,radiusZ=1){
+ const mid=a.clone().add(b).multiplyScalar(.5),dir=b.clone().sub(a);
+ dummy.position.copy(mid);dummy.quaternion.setFromUnitVectors(upAxis,dir.clone().normalize());
+ dummy.scale.set(radiusX,dir.length(),radiusZ);dummy.updateMatrix();
+ mesh.setMatrixAt(index,dummy.matrix);
+}
+let ri=0;
+const rootMatrix=new THREE.Matrix4(),rootPosition=new THREE.Vector3(),rootScale=new THREE.Vector3(),rootQuaternion=new THREE.Quaternion();
+for(let i=0;i<TREE_COUNT;i++){
+ trunks.getMatrixAt(i,rootMatrix);rootMatrix.decompose(rootPosition,rootQuaternion,rootScale);
+ const base=new THREE.Vector3(rootPosition.x,heightAt(rootPosition.x,rootPosition.z)-1.31,rootPosition.z);
+ for(let j=0;j<3;j++){
+  const a=j*Math.PI*2/3+i*.91;
+  const reach=rand(2.8,4.8);
+   const ex=base.x+Math.cos(a)*reach,ez=base.z+Math.sin(a)*reach;
+   const end=new THREE.Vector3(ex,heightAt(ex,ez)-1.32,ez);
+  placeBetween(roots,ri++,base,end,rand(.72,1.0),rand(.72,1.0));
+ }
+}
+for(const [x,z,s] of giantPositions){
+ const base=new THREE.Vector3(x,heightAt(x,z)-1.2,z);
+ for(let j=0;j<6;j++){
+  const a=j*Math.PI/3;
+  const end=new THREE.Vector3(x+Math.cos(a)*rand(8,12)*s,base.y-.8,z+Math.sin(a)*rand(8,12)*s);
+  placeBetween(roots,ri++,base,end,1.7*s,1.7*s);
+ }
+}
+roots.count=ri;roots.instanceMatrix.needsUpdate=true;scene.add(roots);
+
+// Hanging vines removed: foliage stays attached to visible plants and trees.
+
+// SECTION: NATURAL SUNLIGHT
+// Directional sunlight is handled by the scene lights above, not visible geometry.
+
+// SECTION: BIOLUMINESCENT FLOWERS
+const FLOWER_COUNT=125;
+const flowerCores=makeInstances(new THREE.SphereGeometry(.27,8,7),glowMat,FLOWER_COUNT);
+const flowerPetals=makeInstances(new THREE.SphereGeometry(.38,7,6),violetMat,FLOWER_COUNT*4);
+for(let i=0;i<FLOWER_COUNT;i++){
+ const x=rand(-100,100),z=rand(-110,110),y=heightAt(x,z)-.15,s=rand(.65,1.25);
+ place(flowerCores,i,x,y+1.25*s,z,s,s,s);
+ for(let j=0;j<4;j++){const a=j*Math.PI/2;place(flowerPetals,i*4+j,x+Math.cos(a)*.48*s,y+1.2*s,z+Math.sin(a)*.48*s,.75*s,.48*s,.75*s,a);}
+}
+scene.add(flowerCores,flowerPetals);
+
+// SECTION: RIVER
+const riverCurve=new THREE.CatmullRomCurve3([
+ new THREE.Vector3(-15,0,115),new THREE.Vector3(-8,0,80),new THREE.Vector3(-13,0,48),
+ new THREE.Vector3(-5,0,15),new THREE.Vector3(10,0,-18),new THREE.Vector3(18,0,-55),
+ new THREE.Vector3(8,0,-95),new THREE.Vector3(24,0,-150)
+]);
+const river=new THREE.Mesh(new THREE.TubeGeometry(riverCurve,180,5.2,12,false),waterMat);
+river.position.y=-1.5;river.scale.y=.09;scene.add(river);
+const riverLight=new THREE.PointLight(0x42e5ca,1.8,75);riverLight.position.set(-8,3,5);scene.add(riverLight);
+
+// SECTION: ROCKS AND FLOATING MOUNTAINS
+const rocks=makeInstances(new THREE.DodecahedronGeometry(1,1),stoneMat,65);
+for(let i=0;i<65;i++){const x=rand(-250,250),z=rand(-250,250);place(rocks,i,x,heightAt(x,z)-.8,z,rand(1,3.5),rand(.7,2),rand(1,3),rand(0,6));}
+scene.add(rocks);
+const floatingGroup=new THREE.Group();
+for(let i=0;i<6;i++){
+ const island=new THREE.Group();
+ const cap=new THREE.Mesh(new THREE.DodecahedronGeometry(1,2),material(0x71816b));
+ cap.scale.set(rand(12,18),rand(7,10),rand(12,18));island.add(cap);
+ const point=new THREE.Mesh(new THREE.ConeGeometry(11,27,7),material(0x3d5a53));
+ point.position.y=-14;island.add(point);
+ const foliage=new THREE.Mesh(new THREE.IcosahedronGeometry(5,1),canopyMats[i%4]);
+ foliage.position.set(0,8,0);foliage.scale.set(1.7,.8,1.3);island.add(foliage);
+ island.position.set(-145+i*57,58+Math.sin(i*1.6)*12,-180-rand(0,60));island.rotation.z=rand(-.12,.12);
+ floatingGroup.add(island);
+}
+scene.add(floatingGroup);
+
+// Atmospheric particle effects removed for a clean, natural scene.
+
+
+// SECTION: PLAYER CONTROLS
+const player={yaw:0,pitch:0,vy:0,grounded:true,height:2.05,speed:10.5,sprint:17};
+const keys={};let locked=false;
+const intro=document.getElementById('intro'),hud=document.getElementById('hud');
+document.getElementById('start').addEventListener('click',()=>renderer.domElement.requestPointerLock());
+document.addEventListener('pointerlockchange',()=>{
+ locked=document.pointerLockElement===renderer.domElement;
+ if(locked){intro.classList.add('hidden');hud.classList.add('visible');}
+ else if(hud.classList.contains('visible')){intro.classList.remove('hidden');intro.querySelector('h1').textContent='PAUSED';intro.querySelector('.sub').textContent='THE JUNGLE IS WAITING';document.getElementById('start').textContent='RETURN TO THE WILD';}
+});
+document.addEventListener('mousemove',e=>{if(!locked)return;player.yaw-=e.movementX*.0021;player.pitch=THREE.MathUtils.clamp(player.pitch-e.movementY*.0021,-1.42,1.42);});
+document.addEventListener('keydown',e=>{keys[e.code]=true;if(e.code==='Space')e.preventDefault();});
+document.addEventListener('keyup',e=>keys[e.code]=false);
+function updatePlayer(dt){
+ const forward=new THREE.Vector3(-Math.sin(player.yaw),0,-Math.cos(player.yaw));
+ const right=new THREE.Vector3(Math.cos(player.yaw),0,-Math.sin(player.yaw));
+ const move=new THREE.Vector3();
+ if(keys.KeyW||keys.ArrowUp)move.add(forward);if(keys.KeyS||keys.ArrowDown)move.sub(forward);
+ if(keys.KeyD||keys.ArrowRight)move.add(right);if(keys.KeyA||keys.ArrowLeft)move.sub(right);
+ if(move.lengthSq())move.normalize();
+ camera.position.addScaledVector(move,(keys.ShiftLeft||keys.ShiftRight?player.sprint:player.speed)*dt);
+ camera.position.x=THREE.MathUtils.clamp(camera.position.x,-340,340);
+ camera.position.z=THREE.MathUtils.clamp(camera.position.z,-340,340);
+ if(keys.Space&&player.grounded){player.vy=8;player.grounded=false;}
+ player.vy-=21*dt;camera.position.y+=player.vy*dt;
+ const floor=heightAt(camera.position.x,camera.position.z)-1.35+player.height;
+ if(camera.position.y<floor){camera.position.y=floor;player.vy=0;player.grounded=true;}
+ camera.rotation.order='YXZ';camera.rotation.y=player.yaw;camera.rotation.x=player.pitch;
+}
+
+// SECTION: ANIMATION LOOP
+const clock=new THREE.Clock();let elapsed=0;
+function animate(){
+ requestAnimationFrame(animate);
+ const dt=Math.min(clock.getDelta(),.04);elapsed+=dt;
+ if(locked)updatePlayer(dt);
+ riverLight.intensity=1.65+Math.sin(elapsed*1.2)*.25;
+ floatingGroup.position.y=Math.sin(elapsed*.22)*1.2;
+ renderer.render(scene,camera);
+}
+animate();
+
+// SECTION: RESIZE
+addEventListener('resize',()=>{camera.aspect=innerWidth/innerHeight;camera.updateProjectionMatrix();renderer.setSize(innerWidth,innerHeight);renderer.setPixelRatio(Math.min(devicePixelRatio,1.35));});
+})();
+</script>
+</body>
+</html>
