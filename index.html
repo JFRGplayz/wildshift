@@ -285,6 +285,9 @@ for(let i=0;i<TREE_COUNT;i++){
  place(crownsC,i,x+rand(-2,2),cy+rand(1,3),z+rand(-2,2),cr*.85,cr*.72,cr*.9,rand(0,6));
  place(crownsD,i,x,cy+cr*.42,z,cr*.68,cr*.62,cr*.7,rand(0,6));
 }
+
+ const upAxis=new THREE.Vector3(0,1,0),rootDir=new THREE.Vector3(); 
+ 
 // SECTION: NATURAL TREE LIMBS
 // Short, upward-sweeping limbs emerge from the trunk and remain tucked inside the crown.
 const branchCount=TREE_COUNT*4;
@@ -365,7 +368,6 @@ scene.add(broadLeaves,broadLeavesLight);
 // Buttress roots make the larger trees feel anchored into the terrain.
 const rootMat=material(0x594a3b,.96);
 const roots=makeInstances(new THREE.CylinderGeometry(.045,.58,1,10,4),rootMat, TREE_COUNT*3+24);
-const upAxis=new THREE.Vector3(0,1,0),rootDir=new THREE.Vector3();
 function placeBetween(mesh,index,a,b,radiusX=1,radiusZ=1){
  const mid=a.clone().add(b).multiplyScalar(.5),dir=b.clone().sub(a);
  dummy.position.copy(mid);dummy.quaternion.setFromUnitVectors(upAxis,dir.clone().normalize());
